@@ -79,11 +79,12 @@ type openAIRequest struct {
 // text and/or images). Go doesn't support union types, so we use any and
 // handle both cases in convertMessage using type switches.
 type openAIMessage struct {
-	Role       string           `json:"role"`
-	Content    any              `json:"content"` // string or []contentPart
-	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
-	Name       string           `json:"name,omitempty"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content"` // string or []contentPart
+	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
 }
 
 // openAITool represents a tool definition.
@@ -114,6 +115,11 @@ type openAIToolCall struct {
 type openAIToolCallFunction struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
+}
+
+type openAIToolCallResult struct {
+	ToolCallID string `json:"tool_call_id"`
+	Content    string `json:"content"`
 }
 
 // contentPart represents a content part (for multimodal).
@@ -338,7 +344,13 @@ func (c *converter) convertToChunk(evt *event.Event) (*openAIChunk, error) {
 		return nil, nil
 	}
 	choice := evt.Response.Choices[0]
-	delta, err := c.convertModelMessageToOpenAI(choice.Delta)
+	message := choice.Delta
+	if choice.Message.Role != "" && choice.Delta.Role == "" {
+		if len(choice.Message.ToolCalls) > 0 ||  choice.Message.Role == "tool" {
+			message = choice.Message
+		}
+	}
+	delta, err := c.convertModelMessageToOpenAI(message)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +394,11 @@ func (c *converter) convertModelMessageToOpenAI(msg model.Message) (*openAIMessa
 	if msg.Content != "" {
 		result.Content = msg.Content
 	}
+	if msg.ReasoningContent != "" {
+		result.ReasoningContent = msg.ReasoningContent
+	}
 	if len(msg.ToolCalls) > 0 {
+		result.ReasoningContent = ""
 		result.ToolCalls = make([]openAIToolCall, 0, len(msg.ToolCalls))
 		for _, tc := range msg.ToolCalls {
 			result.ToolCalls = append(result.ToolCalls, openAIToolCall{
